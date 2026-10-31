@@ -44,6 +44,9 @@
 
 * { box-sizing: border-box; }
 
+/* hidden always wins, whatever the element's display */
+[hidden] { display: none !important; }
+
 html, body { height: 100%; }
 
 body {
@@ -434,6 +437,90 @@ button { font: inherit; color: inherit; cursor: pointer; }
   z-index: 60;
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0) scale(1); }
+
+/* -------------------------------- sync code -------------------------------- */
+
+.link-btn {
+  margin-top: 14px;
+  padding: 4px 2px;
+  border: None;
+  background: none;
+  color: var(--violet);
+  font-family: var(--font-ui);
+  font-size: .78rem;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.link-btn:hover { color: var(--accent-text); }
+
+.sync-panel {
+  width: 100%;
+  max-width: 300px;
+  margin-top: 6px;
+  padding: 16px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.sync-panel[hidden] { display: none; }
+
+.sync-note {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: .78rem;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.sync-code-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sync-code-wrap[hidden] { display: none; }
+
+.sync-code {
+  font-family: var(--font-ui);
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: .12em;
+  color: var(--text);
+  background: var(--bg);
+  padding: 6px 10px;
+  border-radius: 8px;
+}
+
+.sync-enter { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+.sync-enter input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--tile-border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: .86rem;
+  letter-spacing: .08em;
+  text-align: center;
+  text-transform: uppercase;
+}
+.sync-enter input:focus { outline: 2px solid color-mix(in srgb, var(--violet) 35%, transparent); outline-offset: 1px; }
+
+.sync-code-inline {
+  margin: 6px 0 10px;
+  font-family: var(--font-ui);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: .14em;
+  color: var(--text);
+}
+.sync-code-inline[hidden] { display: none; }
 
 /* ------------------------------- hint cost -------------------------------- */
 
