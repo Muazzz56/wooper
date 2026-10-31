@@ -533,6 +533,62 @@
     return s;
   }
 
+  // Current streak read straight off the history, so it can be rebuilt after a
+  // merge instead of being trusted from whichever device wrote last.
+  function currentFromHistory(history) {
+    const keys = Object.keys(history || {}).sort();
+    let run = 0;
+    let cursor = null;
+    for (let i = keys.length - 1; i >= 0; i--) {
+      if (history[keys[i]] !== "win") break;
+      if (cursor && daysBetween(keys[i], cursor) !== 1) break;
+      cursor = keys[i];
+      run += 1;
+    }
+    return run;
+  }
+
+  // Two devices, one account. Take the union of the histories and let a win on
+  // either device stand — a loss recorded elsewhere can never erase it. Counters
+  // are recomputed rather than copied, so the merge is the same whichever way
+  // round it runs: both devices end up showing the same numbers.
+  function mergeStreaks(a, b) {
+    const local = Object.assign(emptyStreaks(), a || {});
+    const remote = Object.assign(emptyStreaks(), b || {});
+    const history = {};
+    Object.keys(local.history || {}).forEach((k) => { history[k] = local.history[k]; });
+    Object.keys(remote.history || {}).forEach((k) => {
+      if (history[k] === "win") return;
+      if (remote.history[k] === "win" || !history[k]) history[k] = remote.history[k];
+    });
+
+    const merged = {
+      history,
+      played: Math.max(local.played || 0, remote.played || 0),
+      wins: Math.max(local.wins || 0, remote.wins || 0),
+      lastPlayed: [local.lastPlayed, remote.lastPlayed].filter(Boolean).sort().pop() || null,
+      lastSolved: [local.lastSolved, remote.lastSolved].filter(Boolean).sort().pop() || null,
+      max: Math.max(local.max || 0, remote.max || 0),
+      current: Math.max(local.current || 0, remote.current || 0),
+    };
+    merged.wins = Math.max(merged.wins, Object.values(history).filter((v) => v === "win").length);
+    merged.current = Math.max(merged.current, currentFromHistory(history));
+    merged.max = Math.max(merged.max, merged.current);
+    return merged;
+  }
+
+  // Which record of today wins, given two? Deterministic and symmetric, so two
+  // devices looking at the same pair always agree — whatever order they sync in.
+  function betterSave(theirs, mine) {
+    const t = { finished: Boolean(theirs.finished), won: Boolean(theirs.won), len: theirs.ladder.length };
+    const m = { finished: Boolean(mine.finished), won: Boolean(mine.won), len: mine.ladder.length };
+    if (t.won !== m.won) return t.won;                    // a win is final, full stop
+    if (t.finished !== m.finished) return t.finished;     // a settled run beats one in progress
+    if (!t.finished) return t.len > m.len;                // still playing: further is better
+    if (t.won) return t.len < m.len;                      // both solved: fewer moves is better
+    return t.len > m.len;                                 // both lost: further is better
+  }
+
   /* --------------------------------- theme -------------------------------- */
 
   // One theme: the pink one. No toggle, no storage, no dark mode.
@@ -1436,6 +1492,14 @@
     const code = getSyncCode();
     if (!authReady() || !code) return false;
     try {
+      // same rule as the email account: read the code's row first and fold in
+      // anything better, so a device that lost can't overwrite a win
+      const remote = await api("/rest/v1/rpc/wooper_sync_load", {
+        method: "POST",
+        body: { p_code: code },
+      });
+      if (remote && typeof remote === "object") mergeRemote(remote);
+
       await api("/rest/v1/rpc/wooper_sync_save", {
         method: "POST",
         body: { p_code: code, p_data: snapshot() },
@@ -1485,11 +1549,10 @@
     let changed = false;
 
     if (remote.streaks && typeof remote.streaks === "object") {
-      const local = loadStreaks();
-      if ((remote.streaks.lastPlayed || "") > (local.lastPlayed || "")) {
-        try {
-          localStorage.setItem(STREAK_KEY, JSON.stringify(remote.streaks));
-        } catch (err) { /* ignore */ }
+      const before = JSON.stringify(loadStreaks());
+      const merged = mergeStreaks(loadStreaks(), remote.streaks);
+      if (JSON.stringify(merged) !== before) {
+        saveStreaks(merged);
         changed = true;
         if (state.daily) renderStreakChip();
       }
@@ -1497,10 +1560,10 @@
 
     const save = remote.save;
     if (save && state.daily && save.dateKey === state.daily.dateKey) {
-      const theirs = Array.isArray(save.ladder) ? save.ladder.length : 0;
-      const mine = state.ladder.length;
-      const further = theirs > mine || (theirs === mine && Boolean(save.finished) && !state.finished);
-      if (further && ladderValid(save.ladder, state.daily)) {
+      // a win anywhere beats a loss here, even a longer loss
+      const takeTheirs = Array.isArray(save.ladder) && ladderValid(save.ladder, state.daily) &&
+        betterSave(save, state);
+      if (takeTheirs) {
         const adopted = {
           dateKey: save.dateKey,
           ladder: save.ladder,
@@ -1530,7 +1593,21 @@
 
   // Everything that belongs to a player, in one blob.
   function snapshot() {
-    return { streaks: loadStreaks(), save: state.daily ? { dateKey: state.daily.dateKey, ladder: state.ladder, finished: state.finished, won: state.won, hintsUsed: state.hintsUsed } : null };
+    return {
+      version: 2,
+      streaks: loadStreaks(),
+      save: state.daily
+        ? {
+            dateKey: state.daily.dateKey,
+            start: state.daily.start,
+            goal: state.daily.goal,
+            ladder: state.ladder,
+            finished: state.finished,
+            won: state.won,
+            hintsUsed: state.hintsUsed,
+          }
+        : null,
+    };
   }
 
   // Access tokens expire after an hour. Swap the refresh token for a new one
@@ -1581,6 +1658,18 @@
   async function pushProgress() {
     const session = await ensureSession();
     if (!session) return;
+    // Never push over something better: read the row first, fold in anything it
+    // knows that this device doesn't, then write the merged version back. This is
+    // what stops a device that lost from overwriting a win made on another one.
+    try {
+      const rows = await api(
+        "/rest/v1/" + AUTH_CONFIG.table + "?select=data,updated_at&user_id=eq." + encodeURIComponent(session.user_id),
+        { token: session.access_token }
+      );
+      if (rows && rows.length && rows[0].data) mergeRemote(rows[0].data);
+    } catch (err) {
+      /* offline or empty — carry on and push what we have */
+    }
     try {
       await api("/rest/v1/" + AUTH_CONFIG.table + "?on_conflict=user_id", {
         method: "POST",
