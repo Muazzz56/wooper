@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#fbeef8">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23e7b0de'/%3E%3Cg fill='%23400849'%3E%3Crect x='7' y='7' width='5' height='5'/%3E%3Crect x='13.5' y='7' width='5' height='5'/%3E%3Crect x='20' y='7' width='5' height='5'/%3E%3Crect x='7' y='13.5' width='5' height='5'/%3E%3Crect x='13.5' y='13.5' width='5' height='5' fill='%23ff5a0a'/%3E%3Crect x='20' y='13.5' width='5' height='5'/%3E%3Crect x='7' y='20' width='5' height='5'/%3E%3Crect x='13.5' y='20' width='5' height='5'/%3E%3Crect x='20' y='20' width='5' height='5'/%3E%3C/g%3E%3C/svg%3E">
+  <meta name="description" content="WOOPER — a daily word ladder. Change one letter at a time to turn the start word into today's goal.">
+  <title>WOOPER — Daily Word Ladder</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="script.js" defer></script>
+</head>
+<body>
+  <div class="app">
+
+    <!-- ========================== sign-in gate ========================== -->
+    <section class="splash gate" id="gate" aria-label="Sign in" hidden>
+      <div class="splash-inner">
+        <div class="splash-mark" aria-hidden="true">
+          <span></span><span></span><span></span>
+          <span></span><span class="on"></span><span></span>
+          <span class="hit"></span><span></span><span class="hit"></span>
+        </div>
+
+        <h1 class="splash-title">Wooper</h1>
+        <p class="splash-line" id="gateLine">Sign in and your streak follows you to any device.</p>
+
+        <form id="gateEmailForm" class="gate-form">
+          <input type="email" id="gateEmail" placeholder="you@example.com" autocomplete="email" required>
+          <button class="btn-primary" id="gateSendBtn" type="submit">Send code</button>
+        </form>
+
+        <form id="gateCodeForm" class="gate-form" hidden>
+          <input type="text" id="gateCode" inputmode="numeric" maxlength="8"
+                 placeholder="code from your inbox" autocomplete="one-time-code" required>
+          <button class="btn-primary" type="submit" id="gateVerifyBtn">Verify</button>
+        </form>
+
+        <p class="gate-msg" id="gateMsg" role="status" aria-live="polite"></p>
+
+        <div class="gate-or"><span>or</span></div>
+        <button class="btn-ghost" id="gateSkipBtn" type="button">Play without an account</button>
+
+        <p class="splash-by" id="gateNote">Without an account, streaks stay on this device.</p>
+
+        <div class="splash-meta">
+          <span class="splash-date" id="gateDate">—</span>
+          <span class="splash-no" id="gateNo">No. —</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================= pre-game screen ======================= -->
+    <section class="splash" id="splash" aria-label="Start today's ladder">
+      <div class="splash-inner">
+        <div class="splash-mark" aria-hidden="true">
+          <span></span><span></span><span></span>
+          <span></span><span class="on"></span><span></span>
+          <span class="hit"></span><span></span><span class="hit"></span>
+        </div>
+
+        <h1 class="splash-title">Wooper</h1>
+
+        <p class="splash-pair" id="splashPair"><span id="splashStart">—</span><em>&rarr;</em><span id="splashGoal">—</span><i id="splashPar">par —</i></p>
+
+        <p class="splash-line" id="splashLine">Two minutes, unlimited guesses.</p>
+
+        <button class="btn-primary" id="playBtn" type="button">Play</button>
+        <button class="btn-ghost" id="splashHelpBtn" type="button">How to play</button>
+
+        <div class="splash-meta">
+          <span class="splash-date" id="splashDate">—</span>
+          <span class="splash-no" id="splashNo">No. —</span>
+          <span class="splash-by">A daily word ladder &middot; one new word every midnight</span>
+        </div>
+      </div>
+    </section>
+
+    <header class="topbar">
+      <div class="topbar-side left">
+        <button id="backBtn" class="icon-btn" type="button" aria-label="Back to today's front page" title="Front page">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M15 5 8 12l7 7"></path>
+          </svg>
+        </button>
+      </div>
+
+      <div class="brand">
+        <h1 class="brand-name">Wooper</h1>
+        <p class="brand-meta" id="brandMeta">Daily word ladder</p>
+      </div>
+
+      <div class="topbar-side right">
+        <button id="hintBtn" class="icon-btn badge-holder" type="button" aria-label="Hint" title="Hint">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M9 18h6M10 21h4"></path>
+            <path d="M12 3a6 6 0 0 0-3.5 10.9c.6.4 1 1.1 1 1.9V16h5v-.2c0-.8.4-1.5 1-1.9A6 6 0 0 0 12 3Z"></path>
+          </svg>
+          <span class="icon-badge" id="hintBadge">2</span>
+        </button>
+        <button id="streakBtn" class="icon-btn badge-holder" type="button" aria-label="Statistics" title="Statistics">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M5 20V9M12 20V4M19 20v-7"></path>
+          </svg>
+          <span class="icon-badge" id="streakCount" hidden>0</span>
+        </button>
+        <button id="helpBtn" class="icon-btn" type="button" aria-label="How to play" title="How to play">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="9"></circle>
+            <path d="M9.4 9.4a2.7 2.7 0 1 1 3.9 2.4c-.8.5-1.3 1.1-1.3 2"></path>
+            <circle cx="12" cy="16.9" r=".9" fill="currentColor" stroke="none"></circle>
+          </svg>
+        </button>
+        <button id="settingsBtn" class="icon-btn" type="button" aria-label="Settings" title="Settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="3.1"></circle>
+            <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 8.9 19a1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 5 8.9a1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9.6a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"></path>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <section class="route" aria-label="Today's ladder">
+      <div class="route-side">
+        <span class="route-label">Start</span>
+        <div class="mini-row" id="startTiles"></div>
+      </div>
+
+      <svg class="route-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M4 12h15M13.5 6.5 19 12l-5.5 5.5"></path>
+      </svg>
+
+      <div class="route-side">
+        <span class="route-label">Goal</span>
+        <div class="mini-row mini-goal" id="goalTiles"></div>
+      </div>
+    </section>
+
+    <section class="status-strip">
+      <span class="status-item" id="moveInfo">MOVE 0</span>
+      <span class="par-pill" id="parPill">PAR &mdash;</span>
+      <span class="status-item status-right" id="distInfo"></span>
+      <span class="clock" id="clock" role="timer" aria-label="Time left">2:00</span>
+    </section>
+
+    <section class="done-banner" id="doneBanner" hidden>
+      <div class="done-main">
+        <span class="done-check" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4"
+               stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5.5 5.5L20 6.5"></path></svg>
+        </span>
+        <span class="done-text" id="doneText">Today's ladder complete</span>
+      </div>
+      <button id="doneResultBtn" class="chip" type="button">Result</button>
+    </section>
+
+    <main class="board-area">
+      <div class="board" id="board" role="group" aria-label="Your word ladder"></div>
+      <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    </main>
+
+    <p class="hint-line" id="hintLine" hidden></p>
+
+    <section class="keyboard" id="keyboard" aria-label="On-screen keyboard"></section>
+
+    <p class="next-puzzle">NEXT LADDER IN <span id="dailyTimer">00:00:00</span></p>
+  </div>
+
+
+  <!-- -------------------------------- SETTINGS -------------------------------- -->
+  <dialog id="settingsDialog" class="modal">
+    <div class="modal-head">
+      <h2>Settings</h2>
+      <button class="modal-close" type="button" data-close="settingsDialog" aria-label="Close">&times;</button>
+    </div>
+
+    <section class="setting-block">
+      <h3 class="setting-title">Account</h3>
+
+      <div id="accountSignedOut">
+        <p class="setting-note">Sign in with your email and your streak follows you to any device.</p>
+
+        <form id="signInForm" class="setting-form">
+          <input type="email" id="emailInput" name="email" placeholder="you@example.com"
+                 autocomplete="email" required>
+          <button class="btn-sm" type="submit" id="sendCodeBtn">Send code</button>
+        </form>
+
+        <form id="codeForm" class="setting-form" hidden>
+          <input type="text" id="codeInput" name="code" inputmode="numeric" maxlength="8"
+                 placeholder="code from your inbox" autocomplete="one-time-code" required>
+          <button class="btn-sm" type="submit" id="verifyBtn">Verify</button>
+        </form>
+
+        <p class="setting-note" id="authMsg" role="status" aria-live="polite"></p>
+        <p class="setting-note dim" id="authHint">Streaks are currently saved on this device only.</p>
+      </div>
+
+      <div id="accountSignedIn" hidden>
+        <p class="setting-email" id="accountEmail"></p>
+        <p class="setting-note dim" id="syncNote">Synced.</p>
+        <button class="btn-sm ghost" id="signOutBtn" type="button">Sign out</button>
+      </div>
+    </section>
+
+
+    <hr class="divider">
+
+    <section class="setting-block">
+      <h3 class="setting-title">This device</h3>
+      <button class="btn-sm ghost" id="clearDataBtn" type="button">Clear saved progress on this device</button>
+      <p class="setting-note dim" style="margin-top:12px">Issue No. <span id="settingsNo">1</span> · built into a single HTML file</p>
+    </section>
+  </dialog>
+
+  <!-- ------------------------------- HOW TO PLAY ------------------------------ -->
+  <dialog id="helpDialog" class="modal">
+    <div class="modal-head">
+      <h2>How to play</h2>
+      <button class="modal-close" type="button" data-close="helpDialog" aria-label="Close">&times;</button>
+    </div>
+    <p>Turn the <b>start word</b> into the <b>goal word</b>, one letter per move.<br>
+       You have <b>2 minutes</b> per ladder and as many guesses as you can fit in.<br>
+       A new ladder is dealt every day at <b>your midnight</b>, and each one has a
+       <b>par</b> — the fewest moves it can be done in.</p>
+
+    <div class="legend">
+      <div class="legend-row">
+        <div class="legend-tiles">
+          <span class="tile correct">S</span><span class="tile absent">T</span><span class="tile absent">O</span><span class="tile absent">N</span><span class="tile absent">E</span>
+        </div>
+        <span><b>Deep pink</b> — the letter is in the goal, in that exact spot.</span>
+      </div>
+      <div class="legend-row">
+        <div class="legend-tiles">
+          <span class="tile absent">S</span><span class="tile absent">T</span><span class="tile absent">O</span><span class="tile present">N</span><span class="tile absent">E</span>
+        </div>
+        <span><b>Signal orange</b> — the letter is in the goal, somewhere else.</span>
+      </div>
+      <div class="legend-row">
+        <div class="legend-tiles">
+          <span class="tile absent">S</span><span class="tile absent">T</span><span class="tile absent">O</span><span class="tile absent">N</span><span class="tile absent">E</span>
+        </div>
+        <span><b>Eggplant violet</b> — that letter is not in the goal word.</span>
+      </div>
+    </div>
+
+    <hr class="divider">
+
+    <ol class="rules">
+      <li>Each new word must be a real word and change <b>exactly one letter</b> from your current word.</li>
+      <li>The <b>2:00 clock</b> starts on your first letter — the timer sits in the status bar and turns orange in the last 30 seconds.</li>
+      <li>Guesses are unlimited: detour as much as you like, but the clock does not stop.</li>
+      <li>Every word you enter is guaranteed to have a route to the goal — words that can't reach it are rejected.</li>
+      <li>Finish the ladder to keep your daily streak alive. Running out of time resets it.</li>
+      <li><b>PAR</b> is the shortest possible number of moves. Beat it for bragging rights.</li>
+      <li id="hintRule">Stuck? You get <b>2 hints</b> per ladder — each one tells you which letter to change and to what.</li>
+      <li>Finish and tap <b>Show the shortest ladder</b> to see how it was meant to be done.</li>
+    </ol>
+    <p style="color:var(--muted);font-size:.76rem;margin-bottom:0">
+      The start and goal words are the same for everyone and reset daily at 00:00 UTC.
+      Your ladder and streak are saved on this device.
+    </p>
+  </dialog>
+
+  <!-- ------------------------------ HINT COST ------------------------------ -->
+  <dialog id="hintDialog" class="modal modal-narrow">
+    <div class="modal-head">
+      <h2>Hints cost time</h2>
+      <button class="modal-close" type="button" data-close="hintDialog" aria-label="Close">&times;</button>
+    </div>
+    <p class="hint-cost" id="hintCostText">Each hint takes <b>15 seconds</b> off the clock. You get <b>2</b> per ladder.</p>
+    <button class="btn-primary" id="hintConfirmBtn" type="button">Use a hint</button>
+    <button class="btn-ghost" type="button" data-close="hintDialog">Not now</button>
+  </dialog>
+
+  <!-- --------------------------------- STATS --------------------------------- -->
+  <dialog id="statsDialog" class="modal">
+    <div class="modal-head">
+      <h2>Statistics</h2>
+      <button class="modal-close" type="button" data-close="statsDialog" aria-label="Close">&times;</button>
+    </div>
+    <div class="stat-grid">
+      <div><div class="stat-num" id="statPlayed">0</div><div class="stat-label">PLAYED</div></div>
+      <div><div class="stat-num" id="statWinPct">0%</div><div class="stat-label">WIN %</div></div>
+      <div><div class="stat-num" id="statStreak">0</div><div class="stat-label">STREAK</div></div>
+      <div><div class="stat-num" id="statMax">0</div><div class="stat-label">MAX STREAK</div></div>
+    </div>
+    <hr class="divider">
+    <p class="history-caption">LAST 7 DAYS</p>
+    <div class="history-row" id="historyRow"></div>
+    <hr class="divider">
+    <p id="streakNote" style="text-align:center;color:var(--muted);font-size:.78rem;margin:0"></p>
+    <p class="history-caption" style="margin-top:14px">NEXT LADDER IN <span id="statsNext">00:00:00</span></p>
+  </dialog>
+
+  <!-- -------------------------------- RESULT --------------------------------- -->
+  <dialog id="resultDialog" class="modal">
+    <button class="modal-close" type="button" data-close="resultDialog" aria-label="Close">&times;</button>
+    <h2 class="result-title" id="resultTitle">Splendid!</h2>
+    <p class="result-sub" id="resultSub"></p>
+    <div class="result-grid" id="resultGrid" aria-hidden="true"></div>
+    <p class="result-sub" id="resultStreak"></p>
+    <button class="link-btn" id="revealBtn" type="button">Show the shortest ladder</button>
+    <div class="solution" id="solutionBox" hidden></div>
+    <button class="btn-primary" id="shareBtn" type="button">Share result</button>
+    <div class="btn-row">
+      <button class="btn-primary alt" type="button" data-close="resultDialog">Close</button>
+    </div>
+  </dialog>
+<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/vce701823e78c4301a35b7e07294d87301792088814092" integrity="sha512-UKNk8GbxkABxKcXYuLkO16EleLGUkcvJWtpSNmExE0Too3ZaFAxTscNWEc1OdAv5/BikHawapSCaiD2XCmp+Bw==" data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f","spa":2}' crossorigin="anonymous"></script>
+</body>
+</html>
