@@ -38,8 +38,8 @@
   // Optional cloud backend. Paste a Supabase project URL + anon key to switch on
   // email sign-in and cross-device streak sync. Empty = fully local (see SETUP.md).
   const AUTH_CONFIG = {
-    supabaseUrl: "",
-    anonKey: "",
+    supabaseUrl: "https://zfgwpokdflhsfniwsnqd.supabase.co",
+    anonKey: "sb_publishable_qhHqxpiXP6FUnt06fa8x7w_ACYmjZl7",
     table: "wooper_progress",
   };
   const SAVE_PREFIX = "wooper.v4.save:";
@@ -1171,6 +1171,41 @@
     }
   }
 
+  // The default Supabase email contains a LINK, not a code. When someone taps it
+  // they come back here with the session in the URL fragment — pick it up,
+  // remember it, and tidy the address bar.
+  function consumeMagicLink() {
+    const hash = location.hash || "";
+    if (!hash.includes("access_token")) {
+      if (hash.includes("error_description")) {
+        try {
+          const params = new URLSearchParams(hash.slice(1));
+          const why = decodeURIComponent(params.get("error_description") || "").replace(/\+/g, " ");
+          history.replaceState(null, "", location.pathname + location.search);
+          setTimeout(() => toast("Sign-in link failed: " + why, 3500), 900);
+        } catch (err) { /* ignore */ }
+      }
+      return false;
+    }
+    try {
+      const params = new URLSearchParams(hash.slice(1));
+      const access = params.get("access_token");
+      if (!access) return false;
+      const claims = JSON.parse(atob(access.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+      saveSession({
+        access_token: access,
+        refresh_token: params.get("refresh_token"),
+        expires_at: Date.now() + Number(params.get("expires_in") || 3600) * 1000,
+        email: claims.email || "",
+        user_id: claims.sub,
+      });
+      history.replaceState(null, "", location.pathname + location.search);
+      return true;
+    } catch (err) {
+      return false;
+    }
+  }
+
   async function api(path, { method = "GET", body, token, prefer } = {}) {
     const base = AUTH_CONFIG.supabaseUrl.replace(/\/$/, "");
     const res = await fetch(base + path, {
@@ -1267,7 +1302,7 @@
     msg.textContent = "Sending…";
     try {
       await api("/auth/v1/otp", { body: { email, create_user: true } });
-      msg.textContent = "Code sent to " + email + ".";
+      msg.textContent = "Sent to " + email + " — tap the link in the email, or type the code here.";
       $(form.codeForm).hidden = false;
       $(form.code).focus();
     } catch (err) {
@@ -1676,7 +1711,16 @@
     tickCountdown();
     setInterval(tickCountdown, 1000);
 
-    openGate();
+    // arriving from an emailed sign-in link? that already counts as signed in
+    const fromLink = authReady() && consumeMagicLink();
+    if (fromLink) {
+      accountUI();
+      pullProgress();
+      setTimeout(() => toast("Signed in as " + (loadSession() || {}).email, 2600), 900);
+    }
+
+    if (fromLink) openSplash();
+    else openGate();
 
     const streak = loadStreaks();
     if (state.won) {
