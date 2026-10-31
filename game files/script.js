@@ -231,7 +231,7 @@
   // par is computed at runtime from the dictionary, so the comment's par is a
   // convenience — it can never disagree with the game.
   const DAILY = [
-    ["hello", "yahoo"],        // No. 1 · 2026-10-31 · par 3
+    ["slate", "crane"],        // No. 1 · 2026-10-31 · par 3
     ["stilt", "slick"],        // No. 2 · 2026-11-01 · par 4
     ["motel", "lover"],        // No. 3 · 2026-11-02 · par 4
     ["jolly", "daily"],        // No. 4 · 2026-11-03 · par 3
