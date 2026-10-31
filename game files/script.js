@@ -62,6 +62,7 @@
     busy: false,        // true while a row is flipping
     hintsUsed: 0,
     deadline: 0,        // ms timestamp, set on the first letter typed
+    paused: 0,          // ms banked while the board is off screen (gate / splash / dialog)
     reason: null,       // "time" when the clock ran out
     streakToastShown: false,
   };
@@ -413,6 +414,7 @@
           won: state.won,
           hintsUsed: state.hintsUsed,
           deadline: state.deadline,
+          paused: state.paused,
           reason: state.reason,
         })
       );
@@ -444,6 +446,7 @@
         state.won = Boolean(saved.won);
         state.hintsUsed = Number.isFinite(saved.hintsUsed) ? saved.hintsUsed : 0;
         state.deadline = Number.isFinite(saved.deadline) ? saved.deadline : 0;
+        state.paused = Number.isFinite(saved.paused) ? Math.max(0, saved.paused) : 0;
         state.reason = saved.reason || null;
         if (state.ladder[state.ladder.length - 1] === goal) {
           state.finished = true;
@@ -458,6 +461,7 @@
     state.won = false;
     state.hintsUsed = 0;
     state.deadline = 0;
+    state.paused = 0;
     state.reason = null;
     return false;
   }
@@ -812,7 +816,7 @@
   }
 
   function typeLetter(letter) {
-    if (state.finished) return;
+    if (state.finished || !boardActive()) return;
     if (state.typed.length >= LEN) {
       // a complete word is already sitting there — send it, then start the next
       if (state.busy && guessQueue.length === 0) submitGuess();
@@ -834,7 +838,7 @@
   }
 
   function backspace() {
-    if (state.finished || !state.typed.length) return;
+    if (state.finished || !boardActive() || !state.typed.length) return;
     state.typed = state.typed.slice(0, -1);
     const row = $("board").querySelector(".typing-row");
     if (!row) return;
@@ -846,7 +850,7 @@
   }
 
   function submitGuess(queued) {
-    if (state.finished) return;
+    if (state.finished || !boardActive()) return;
     if (state.busy && !queued) {
       // the previous row is still flipping — hold this word, send it next
       if (state.typed.length < LEN) return reject("Not enough letters");
@@ -890,6 +894,7 @@
     renderBoard(rowIndex);
     renderStatus();
     saveState();
+    queuePush();
 
     // Flip the tiles, colouring each one as its animation passes the halfway mark.
     const row = $("board").querySelectorAll(".row")[rowIndex];
@@ -924,6 +929,7 @@
     saveState();
     recordResult(state.daily.dateKey, true);
     if (typeof pushProgress === "function") pushProgress();
+    if (typeof syncPush === "function") syncPush();
     renderStatus();
 
     // drop the empty rows first so the goal row is the last one
@@ -1015,6 +1021,98 @@
       (cost > 0 ? ", and takes <b>" + cost + " seconds</b> off the clock." : ".");
   }
 
+  function renderSyncUI() {
+    const code = getSyncCode();
+    const wrap = $("syncCodeWrap");
+    if (wrap) {
+      wrap.hidden = !code;
+      const text = $("syncCodeText");
+      if (text) text.textContent = prettyCode(code) || "—";
+    }
+    const createBtn = $("syncCreateBtn");
+    if (createBtn) {
+      createBtn.hidden = Boolean(code);
+      createBtn.textContent = "Create a code on this device";
+    }
+    const status = $("syncStatus");
+    if (status) {
+      status.textContent = code
+        ? "Linked — this streak follows the code to any device."
+        : "Not set — your streak stays on this device.";
+    }
+    const inline = $("settingsCode");
+    if (inline) {
+      inline.hidden = !code;
+      inline.textContent = prettyCode(code);
+    }
+    const forget = $("settingsForgetBtn");
+    if (forget) forget.hidden = !code;
+    const setup = $("settingsSyncBtn");
+    if (setup) setup.textContent = code ? "Use a different code" : "Set up a sync code";
+  }
+
+  function syncMsg(text) {
+    const el = $("syncMsg");
+    if (el) el.textContent = text;
+  }
+
+  function openSyncPanel() {
+    $("syncPanel").hidden = false;
+    $("gateSyncBtn").hidden = true;
+    syncMsg("");
+    renderSyncUI();
+    if (!getSyncCode() && authReady()) syncMsg("Create a code here, then type it on your other device.");
+    if (!authReady()) syncMsg("Sync codes need the backend keys — see SETUP.md.");
+  }
+
+  function closeSyncPanel() {
+    $("syncPanel").hidden = true;
+    $("gateSyncBtn").hidden = false;
+    syncMsg("");
+  }
+
+  async function createSync() {
+    if (!authReady()) return syncMsg("Sync codes need the backend keys — see SETUP.md.");
+    const code = makeSyncCode();
+    setSyncCode(code);
+    renderSyncUI();
+    const ok = await syncPush();
+    syncMsg(ok ? "Code saved. Type it on your other device." : "Code created, but it couldn't be saved online yet.");
+    // let them read the code, then drop them on the front page
+    setTimeout(() => {
+      if (!$("syncPanel").hidden) closeGate(true);
+    }, ok ? 2200 : 4000);
+  }
+
+  async function useSync() {
+    if (!authReady()) return syncMsg("Sync codes need the backend keys — see SETUP.md.");
+    const code = normaliseCode($("syncCodeInput").value);
+    if (!code) return syncMsg("That code doesn't look right — 12 letters and numbers.");
+    syncMsg("Looking up " + code + "…");
+
+    const previous = getSyncCode();
+    setSyncCode(code);
+    const found = await syncPull();
+    if (!found) {
+      // either a brand new code or a typo; don't silently hijack a working link
+      setSyncCode(previous);
+      renderSyncUI();
+      return syncMsg("No streak on that code yet. Check it, or create one here.");
+    }
+    await syncPush().catch(() => {});
+    renderSyncUI();
+    syncMsg("Linked. Your streak is on this device now.");
+    toast("Streak synced", 1800);
+    renderSplash();
+    setTimeout(() => closeGate(true), 900);
+  }
+
+  function forgetSync() {
+    setSyncCode("");
+    renderSyncUI();
+    toast("Sync code removed from this device", 2000);
+  }
+
   function openHintNote() {
     const left = hintLimit() - state.hintsUsed;
     const p = $("hintCostText");
@@ -1043,9 +1141,13 @@
     state.hintsUsed++;
 
     // a hint eats into the clock (CONFIG.hintTimeCost)
-    if (CONFIG.hintTimeCost > 0 && state.deadline) {
+    if (CONFIG.hintTimeCost > 0 && (state.deadline || state.paused)) {
       const floor = Date.now() + 5000;
-      state.deadline = Math.max(floor, state.deadline - CONFIG.hintTimeCost * 1000);
+      if (state.paused) {
+        state.paused = Math.max(5000, state.paused - CONFIG.hintTimeCost * 1000);
+      } else {
+        state.deadline = Math.max(floor, state.deadline - CONFIG.hintTimeCost * 1000);
+      }
       paintClock();
       const clock = $("clock");
       clock.classList.remove("penalty");
@@ -1054,6 +1156,7 @@
       setTimeout(() => clock.classList.remove("penalty"), 900);
     }
     saveState();
+    queuePush();
 
     let pos = 1;
     for (let i = 0; i < LEN; i++) {
@@ -1084,6 +1187,7 @@
     saveState();
     recordResult(state.daily.dateKey, false);
     if (typeof pushProgress === "function") pushProgress();
+    if (typeof syncPush === "function") syncPush();
 
     $("board").querySelectorAll(".typing-row, .pending-row").forEach((row) => row.remove());
     renderStatus();
@@ -1100,8 +1204,20 @@
 
   function clockLeftMs() {
     if (state.finished) return 0;
+    if (state.paused) return Math.max(0, state.paused);
     if (!state.deadline) return CONFIG.secondsPerLadder * 1000;
     return Math.max(0, state.deadline - Date.now());
+  }
+
+  // true only when the board itself is on screen — the gate, the splash and any
+  // open dialog all sit on top of it, and none of them should burn the clock.
+  function boardActive() {
+    const gate = $("gate");
+    const splash = $("splash");
+    if (gate && !gate.hidden) return false;
+    if (splash && !splash.hidden) return false;
+    if (document.querySelector("dialog[open]")) return false;
+    return true;
   }
 
   function clockText() {
@@ -1114,19 +1230,43 @@
     if (!el) return;
     const left = clockLeftMs();
     el.textContent = state.finished ? (state.won ? "DONE" : "0:00") : clockText();
-    el.classList.toggle("running", !state.finished && Boolean(state.deadline));
-    el.classList.toggle("warn", !state.finished && Boolean(state.deadline) && left <= 30000);
-    el.classList.toggle("critical", !state.finished && Boolean(state.deadline) && left <= 10000);
+    const started = Boolean(state.deadline || state.paused);
+    el.classList.toggle("running", !state.finished && started);
+    el.classList.toggle("warn", !state.finished && started && left <= 30000);
+    el.classList.toggle("critical", !state.finished && started && left <= 10000);
   }
 
+  // The clock only ever starts from a letter landing on the board. Nothing on
+  // the gate or the splash can set it going, and anything already banked by
+  // bankClock() is handed back the moment play resumes.
   function startClock() {
-    if (state.finished || state.deadline || !state.daily) return;
-    const penalty = CONFIG.hintTimeCost * 1000 * state.hintsUsed;
-    state.deadline = Date.now() + CONFIG.secondsPerLadder * 1000 - penalty;
-    saveState();
-    stopClock();
-    clockId = setInterval(tickClock, 250);
+    if (state.finished || !state.daily || !boardActive()) return;
+
+    if (state.paused) {
+      state.deadline = Date.now() + state.paused;
+      state.paused = 0;
+      saveState();
+    }
+    if (!state.deadline) {
+      const penalty = CONFIG.hintTimeCost * 1000 * state.hintsUsed;
+      state.deadline = Date.now() + CONFIG.secondsPerLadder * 1000 - penalty;
+      saveState();
+    }
+    if (!clockId) clockId = setInterval(tickClock, 250);
     tickClock();
+  }
+
+  // Take the clock off the wall and put the remaining time in the bank. Called
+  // whenever the board is covered, so nobody loses seconds to a sign-in screen,
+  // a reload or the how-to-play modal.
+  function bankClock() {
+    if (state.finished) return stopClock();
+    stopClock();
+    if (!state.deadline) return;
+    state.paused = Math.max(0, state.deadline - Date.now());
+    state.deadline = 0;
+    saveState();
+    paintClock();
   }
 
   function stopClock() {
@@ -1252,6 +1392,142 @@
     return raw;
   }
 
+  /* ------------------------------ sync codes ------------------------------ */
+  // A code is the whole credential: type it on a second device and you get the
+  // same streak. No email, no SMTP. 12 characters from a 31-letter alphabet is
+  // about 59 bits — not guessable — and only its sha256 is ever stored.
+
+  const SYNC_KEY = "wooper.v4.synccode";
+  const SYNC_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // no I/L/O/0/1
+
+  function getSyncCode() {
+    try {
+      return localStorage.getItem(SYNC_KEY) || "";
+    } catch (err) {
+      return "";
+    }
+  }
+
+  function setSyncCode(code) {
+    try {
+      if (code) localStorage.setItem(SYNC_KEY, code);
+      else localStorage.removeItem(SYNC_KEY);
+    } catch (err) { /* ignore */ }
+  }
+
+  function makeSyncCode() {
+    const bytes = new Uint8Array(12);
+    if (window.crypto && crypto.getRandomValues) crypto.getRandomValues(bytes);
+    else for (let i = 0; i < 12; i++) bytes[i] = Math.floor(Math.random() * 256);
+    const chars = [...bytes].map((b) => SYNC_ALPHABET[b % SYNC_ALPHABET.length]);
+    return chars.join("").replace(/(.{4})(?!$)/g, "$1-");
+  }
+
+  function normaliseCode(input) {
+    const raw = String(input || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    return raw.length === 12 ? raw.replace(/(.{4})(?!$)/g, "$1-") : "";
+  }
+
+  function prettyCode(code) {
+    return code ? code.toUpperCase() : "";
+  }
+
+  async function syncPush() {
+    const code = getSyncCode();
+    if (!authReady() || !code) return false;
+    try {
+      await api("/rest/v1/rpc/wooper_sync_save", {
+        method: "POST",
+        body: { p_code: code, p_data: snapshot() },
+      });
+      return true;
+    } catch (err) {
+      return false;
+    }
+  }
+
+  async function syncPull() {
+    const code = getSyncCode();
+    if (!authReady() || !code) return null;
+    try {
+      const remote = await api("/rest/v1/rpc/wooper_sync_load", {
+        method: "POST",
+        body: { p_code: code },
+      });
+      if (!remote) return null;          // no such code
+      mergeRemote(remote);               // take whatever is newer
+      return remote;                     // the code exists, link it
+    } catch (err) {
+      return null;
+    }
+  }
+
+  // A ladder from somewhere else is only worth taking if it is genuinely a
+  // ladder for today's puzzle: right start word, real words, one letter apart,
+  // still able to reach the goal. Anything else is thrown away untouched.
+  function ladderValid(ladder, daily) {
+    if (!Array.isArray(ladder) || !ladder.length || ladder[0] !== daily.start) return false;
+    return ladder.every((word, i, arr) =>
+      i === 0
+        ? word === daily.start
+        : typeof word === "string" &&
+          DICT_SET.has(word) &&
+          oneLetterApart(arr[i - 1], word) &&
+          daily.distToGoal.has(word)
+    );
+  }
+
+  // Pull only what's newer: the streak with the later lastPlayed, and today's
+  // ladder if the other side got further into it (or finished a run we haven't).
+  // The clock stays on the device you are holding — see §19 in CHANGES.md.
+  function mergeRemote(remote) {
+    if (!remote || typeof remote !== "object") return false;
+    let changed = false;
+
+    if (remote.streaks && typeof remote.streaks === "object") {
+      const local = loadStreaks();
+      if ((remote.streaks.lastPlayed || "") > (local.lastPlayed || "")) {
+        try {
+          localStorage.setItem(STREAK_KEY, JSON.stringify(remote.streaks));
+        } catch (err) { /* ignore */ }
+        changed = true;
+        if (state.daily) renderStreakChip();
+      }
+    }
+
+    const save = remote.save;
+    if (save && state.daily && save.dateKey === state.daily.dateKey) {
+      const theirs = Array.isArray(save.ladder) ? save.ladder.length : 0;
+      const mine = state.ladder.length;
+      const further = theirs > mine || (theirs === mine && Boolean(save.finished) && !state.finished);
+      if (further && ladderValid(save.ladder, state.daily)) {
+        const adopted = {
+          dateKey: save.dateKey,
+          ladder: save.ladder,
+          finished: Boolean(save.finished),
+          won: Boolean(save.won),
+          hintsUsed: Number.isFinite(save.hintsUsed) ? save.hintsUsed : state.hintsUsed,
+          deadline: 0,
+          paused: 0,
+          reason: save.reason || null,
+        };
+        try {
+          localStorage.setItem(SAVE_PREFIX + save.dateKey, JSON.stringify(adopted));
+        } catch (err) { /* ignore */ }
+        state.typed = "";
+        restoreState();
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      render();
+      if (state.daily && !$("splash").hidden) renderSplash();
+      if (typeof accountUI === "function") accountUI();
+    }
+    return changed;
+  }
+
   // Everything that belongs to a player, in one blob.
   function snapshot() {
     return { streaks: loadStreaks(), save: state.daily ? { dateKey: state.daily.dateKey, ladder: state.ladder, finished: state.finished, won: state.won, hintsUsed: state.hintsUsed } : null };
@@ -1290,6 +1566,18 @@
     }
   }
 
+  // Every accepted move is worth pushing, but not one request per keystroke:
+  // a short debounce means the account holds today's ladder within a second of
+  // the move that made it, so the other device can pick it up.
+  let pushTimer = null;
+  function queuePush() {
+    clearTimeout(pushTimer);
+    pushTimer = setTimeout(() => {
+      if (authReady() && loadSession() && loadSession().email) pushProgress();
+      if (typeof getSyncCode === "function" && getSyncCode()) syncPush();
+    }, 800);
+  }
+
   async function pushProgress() {
     const session = await ensureSession();
     if (!session) return;
@@ -1314,18 +1602,19 @@
         { token: session.access_token }
       );
       if (!rows || !rows.length || !rows[0].data) return false;
-      const remote = rows[0].data;
-      const local = loadStreaks();
-      const remoteNewer =
-        remote.streaks && (remote.streaks.lastPlayed || "") > (local.lastPlayed || "");
-      if (remoteNewer) {
-        localStorage.setItem(STREAK_KEY, JSON.stringify(remote.streaks));
-        if (state.daily) renderStreakChip();
-      }
-      return Boolean(remoteNewer);
+      return mergeRemote(rows[0].data);
     } catch (err) {
       return false;
     }
+  }
+
+  // Boot-time account sync: take whatever the account knows (a ladder played on
+  // another device, a streak that continued there), then send this device's
+  // version up so the two never drift apart.
+  async function syncAccount() {
+    const changed = await pullProgress();
+    await pushProgress();
+    return changed;
   }
 
   function accountUI() {
@@ -1342,6 +1631,7 @@
       ? "We email you a code — no password to remember."
       : "Accounts need a backend: paste your Supabase URL and anon key into AUTH_CONFIG (see SETUP.md). Until then streaks stay on this device.";
     $("settingsNo").textContent = state.daily ? puzzleNumber(state.daily.dateKey) : 1;
+    renderSyncUI();
   }
 
   // The same pair of forms appears twice: on the gate before the front page and
@@ -1444,8 +1734,9 @@
   }
 
   function openGate() {
+    bankClock();
     const signedIn = Boolean(loadSession() && loadSession().email);
-    if (signedIn || guestToday()) return openSplash();
+    if (signedIn || guestToday() || getSyncCode()) return openSplash();
 
     const dateKey = state.daily.dateKey;
     $("gateDate").textContent = prettyDate(dateKey);
@@ -1461,6 +1752,13 @@
     $("gate").hidden = false;
     $("splash").hidden = true;
     document.body.classList.add("splash-open");
+
+    if ($("syncPanel")) {
+      $("syncPanel").hidden = true;
+      $("gateSyncBtn").hidden = false;
+      $("syncMsg").textContent = "";
+      $("syncCodeInput").value = "";
+    }
   }
 
   function closeGate(guest) {
@@ -1475,6 +1773,7 @@
   }
 
   function openSplash() {
+    bankClock();
     guessQueue.length = 0;
     renderSplash();
     $("splash").hidden = false;
@@ -1658,6 +1957,7 @@
   /* --------------------------------- dialogs ------------------------------ */
 
   function openDialog(id) {
+    bankClock();
     const dialog = $(id);
     if (dialog && !dialog.open) dialog.showModal();
   }
@@ -1739,7 +2039,8 @@
     state.daily = pickDailyPuzzle();
     const restored = restoreState();
 
-    // the clock survives reloads: resume it, or call the run if it already ran out
+    // the clock survives reloads: if it already ran out the day is lost, and
+    // otherwise the remaining time goes into the bank until a letter lands.
     if (!state.finished && state.deadline) {
       if (state.deadline <= Date.now()) {
         state.finished = true;
@@ -1760,11 +2061,7 @@
     renderTargets();
     render();
 
-    if (!state.finished && state.deadline) {
-      stopClock();
-      clockId = setInterval(tickClock, 250);
-      tickClock();
-    }
+    if (!state.finished && state.deadline) bankClock();
 
     tickCountdown();
     setInterval(tickCountdown, 1000);
@@ -1777,6 +2074,10 @@
       pushProgress();
       setTimeout(() => toast("Signed in as " + (loadSession() || {}).email, 2600), 900);
     }
+
+    if (getSyncCode()) syncPull();
+    // signed in? the account, not the device, decides what today looks like
+    if (authReady() && (loadSession() || {}).email) syncAccount();
 
     if (fromLink) openSplash();
     else openGate();
@@ -1815,6 +2116,32 @@
     $("gateEmailForm").addEventListener("submit", (e) => { e.preventDefault(); sendCode(AUTH_FORM_GATE); });
     $("gateCodeForm").addEventListener("submit", (e) => { e.preventDefault(); verifyCode(AUTH_FORM_GATE); });
     $("gateSkipBtn").addEventListener("click", () => closeGate(true));
+
+    $("gateSyncBtn").addEventListener("click", openSyncPanel);
+    $("syncBackBtn").addEventListener("click", closeSyncPanel);
+    $("syncCreateBtn").addEventListener("click", createSync);
+    $("syncUseBtn").addEventListener("click", useSync);
+    $("syncCodeInput").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); useSync(); }
+    });
+    $("syncCopyBtn").addEventListener("click", async () => {
+      const code = prettyCode(getSyncCode());
+      if (!code) return;
+      try {
+        await navigator.clipboard.writeText(code);
+        syncMsg("Copied.");
+      } catch (err) {
+        syncMsg("Copy failed — write it down instead.");
+      }
+    });
+    $("settingsSyncBtn").addEventListener("click", () => {
+      $("settingsDialog").close();
+      $("gate").hidden = false;
+      $("splash").hidden = true;
+      document.body.classList.add("splash-open");
+      openSyncPanel();
+    });
+    $("settingsForgetBtn").addEventListener("click", forgetSync);
     $("signOutBtn").addEventListener("click", () => {
       saveSession(null);
       try {
@@ -1865,6 +2192,9 @@
 
     document.addEventListener("keydown", (event) => {
       if (document.querySelector("dialog[open]")) return;
+      if (!boardActive()) return;
+      const field = event.target;
+      if (field && (field.tagName === "INPUT" || field.tagName === "TEXTAREA" || field.isContentEditable)) return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       if (event.key === "Enter") {
         event.preventDefault();
