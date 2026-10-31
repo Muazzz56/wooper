@@ -1206,10 +1206,12 @@
     }
   }
 
-  async function api(path, { method = "GET", body, token, prefer } = {}) {
+  async function api(path, { method, body, token, prefer } = {}) {
     const base = AUTH_CONFIG.supabaseUrl.replace(/\/$/, "");
+    // a body means it's a write — never send one on a GET, the browser rejects it
+    const verb = method || (body ? "POST" : "GET");
     const res = await fetch(base + path, {
-      method,
+      method: verb,
       headers: {
         "Content-Type": "application/json",
         apikey: AUTH_CONFIG.anonKey,
@@ -1219,12 +1221,35 @@
       body: body ? JSON.stringify(body) : undefined,
     });
     const text = await res.text();
-    const data = text ? JSON.parse(text) : null;
-    if (!res.ok) {
-      const msg = (data && (data.msg || data.message || data.error_description || data.error)) || "Request failed";
-      throw new Error(msg);
+    let data = null;
+    if (text) {
+      try {
+        data = JSON.parse(text);
+      } catch (err) {
+        data = { msg: text.replace(/<[^>]*>/g, " ").trim().slice(0, 160) };
+      }
     }
+    if (!res.ok) throw new Error(apiErrorText(data, res.status));
     return data;
+  }
+
+  function apiErrorText(data, status) {
+    const raw =
+      (data && (data.msg || data.message || data.error_description || data.error)) ||
+      "Request failed (" + status + ")";
+    if (/rate limit|once every \d+ seconds/i.test(raw)) {
+      return "Too many emails — one per minute is the limit. Wait a moment and try again.";
+    }
+    if (/invalid format|invalid email|address .{0,60}is invalid/i.test(raw)) {
+      return "That email address doesn't look right.";
+    }
+    if (status === 403 && /expired|invalid/i.test(raw)) {
+      return "That code has expired — send a new one.";
+    }
+    if (status >= 500) {
+      return "The sign-in service is having a moment. Try again shortly.";
+    }
+    return raw;
   }
 
   // Everything that belongs to a player, in one blob.
@@ -1232,9 +1257,42 @@
     return { streaks: loadStreaks(), save: state.daily ? { dateKey: state.daily.dateKey, ladder: state.ladder, finished: state.finished, won: state.won, hintsUsed: state.hintsUsed } : null };
   }
 
-  async function pushProgress() {
+  // Access tokens expire after an hour. Swap the refresh token for a new one
+  // before it lapses, so a long session doesn't quietly stop syncing.
+  async function ensureSession() {
     const session = loadSession();
-    if (!authReady() || !session) return;
+    if (!authReady() || !session) return null;
+    const stale = !session.expires_at || Date.now() > session.expires_at - 60000;
+    if (!stale || !session.refresh_token) return session;
+
+    try {
+      const data = await api("/auth/v1/token?grant_type=refresh_token", {
+        method: "POST",
+        body: { refresh_token: session.refresh_token },
+      });
+      const fresh = {
+        ...session,
+        access_token: data.access_token,
+        refresh_token: data.refresh_token || session.refresh_token,
+        expires_at: Date.now() + (data.expires_in || 3600) * 1000,
+      };
+      saveSession(fresh);
+      return fresh;
+    } catch (err) {
+      // no connection? keep the session and try again next time — only a real
+      // rejection from Supabase should sign someone out
+      if (/failed to fetch|networkerror|load failed|network request failed/i.test(err.message)) {
+        return session;
+      }
+      saveSession(null);
+      accountUI();
+      return null;
+    }
+  }
+
+  async function pushProgress() {
+    const session = await ensureSession();
+    if (!session) return;
     try {
       await api("/rest/v1/" + AUTH_CONFIG.table + "?on_conflict=user_id", {
         method: "POST",
@@ -1248,8 +1306,8 @@
   }
 
   async function pullProgress() {
-    const session = loadSession();
-    if (!authReady() || !session) return false;
+    const session = await ensureSession();
+    if (!session) return false;
     try {
       const rows = await api(
         "/rest/v1/" + AUTH_CONFIG.table + "?select=data,updated_at&user_id=eq." + encodeURIComponent(session.user_id),
@@ -1301,7 +1359,7 @@
     }
     msg.textContent = "Sending…";
     try {
-      await api("/auth/v1/otp", { body: { email, create_user: true } });
+      await api("/auth/v1/otp", { method: "POST", body: { email, create_user: true } });
       msg.textContent = "Sent to " + email + " — tap the link in the email, or type the code here.";
       $(form.codeForm).hidden = false;
       $(form.code).focus();
@@ -1317,7 +1375,7 @@
     if (!code) return;
     msg.textContent = "Checking…";
     try {
-      const data = await api("/auth/v1/verify", { body: { email, token: code, type: "email" } });
+      const data = await api("/auth/v1/verify", { method: "POST", body: { email, token: code, type: "email" } });
       saveSession({
         access_token: data.access_token,
         refresh_token: data.refresh_token,
@@ -1716,6 +1774,7 @@
     if (fromLink) {
       accountUI();
       pullProgress();
+      pushProgress();
       setTimeout(() => toast("Signed in as " + (loadSession() || {}).email, 2600), 900);
     }
 
